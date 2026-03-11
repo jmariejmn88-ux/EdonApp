@@ -7,7 +7,7 @@ import { Menu, X, ChevronDown, Check, Star, Phone, MessageCircle, Zap } from 'lu
 
 const CONFIG = {
   brand: {
-    name: "GlowShop",
+    name: "EdonApp",
     logo: "✨",
     slogan: "Commandes rapides. Paiements sécurisés. Zéro erreur.",
     description: "Créez votre boutique sur WhatsApp"
