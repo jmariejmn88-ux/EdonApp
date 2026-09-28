@@ -194,6 +194,10 @@ begin
   where a.installment_id = p_installment
     and app.is_collected(p.status);
 
+  -- Marqueur lu par le garde-fou des statuts calculés (0004) : seul ce
+  -- recalcul peut poser 'paid' / 'partially_paid' / 'overdue'.
+  perform set_config('app.recomputing', 'on', true);
+
   update public.installments i
   set amount_paid = v_paid,
       status = case
@@ -204,6 +208,8 @@ begin
         else 'pending'
       end::public.installment_status
   where i.id = p_installment;
+
+  perform set_config('app.recomputing', 'off', true);
 
   if exists (select 1 from public.installments where id = p_installment and amount_paid > amount) then
     raise exception 'Affectation refusée : le montant payé dépasse le montant de l''échéance %', p_installment
@@ -231,6 +237,8 @@ begin
   where a.invoice_id = p_invoice
     and app.is_collected(p.status);
 
+  perform set_config('app.recomputing', 'on', true);
+
   update public.invoices f
   set amount_paid = v_paid,
       status = case
@@ -241,6 +249,8 @@ begin
         else 'issued'
       end::public.invoice_status
   where f.id = p_invoice;
+
+  perform set_config('app.recomputing', 'off', true);
 
   if exists (select 1 from public.invoices where id = p_invoice and amount_paid > total) then
     raise exception 'Affectation refusée : le montant payé dépasse le total de la facture %', p_invoice

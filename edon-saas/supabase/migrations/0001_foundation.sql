@@ -163,15 +163,6 @@ as $$
   );
 $$;
 
--- Droit d'écriture générique sur les données métier d'une organisation.
-create or replace function app.can_write(org uuid)
-returns boolean
-language sql stable security definer
-set search_path = public, pg_temp
-as $$
-  select app.has_permission(org, 'records.write');
-$$;
-
 -- ---------------------------------------------------------------------
 -- Motif d'une modification (cahier §29 : ancienne valeur, nouvelle
 -- valeur, utilisateur, date, MOTIF). L'application appelle
@@ -208,6 +199,15 @@ begin
   end if;
 
   v_org := coalesce((v_new ->> 'organization_id'), (v_old ->> 'organization_id'))::uuid;
+
+  -- Tables sans colonne organization_id : on retrouve l'organisation.
+  if v_org is null and tg_table_name = 'organizations' then
+    v_org := coalesce((v_new ->> 'id'), (v_old ->> 'id'))::uuid;
+  elsif v_org is null and tg_table_name = 'role_permissions' then
+    select organization_id into v_org
+    from public.roles
+    where id = coalesce((v_new ->> 'role_id'), (v_old ->> 'role_id'))::uuid;
+  end if;
 
   insert into public.audit_log
     (organization_id, table_name, record_id, action, old_data, new_data, changed_by, reason)
