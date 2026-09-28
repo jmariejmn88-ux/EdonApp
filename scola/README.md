@@ -8,9 +8,9 @@ Stack cible : **Next.js + PostgreSQL (Neon) + Drizzle + Better Auth**, déploiem
 > connexion Better Auth et les rôles Postgres sont créés par `0000_platform.sql`.
 > Reste à écrire le code Next.js (Better Auth, Drizzle, `withUser()`).
 
-> ℹ️ La base de données est sécurisée (RLS active, testée) mais **n'a pas encore été
-> appliquée sur Neon** : les tests tournent sur un Postgres 16 local. L'application
-> Next.js n'existe pas encore.
+> ✅ **Base Neon en place (branche `dev`).** Les 5 migrations sont appliquées sur le projet
+> Neon « Scola » (branche `dev`, Postgres 18) et le contrôle de sécurité y passe (13/13).
+> La branche `production` n'a pas encore été touchée. L'application Next.js n'existe pas encore.
 
 ## État d'avancement
 
@@ -112,6 +112,20 @@ directeur d'une autre école, compte sans école et connexion applicative sans
 utilisateur, et vérifie que
 chaque tentative interdite est refusée **pour le bon motif**.
 
+## Contrôle rapide sur Neon (sans psql)
+
+`db/tests/smoke_check.sql` est **une seule instruction SQL** : on peut la coller dans
+l'éditeur SQL de Neon (ou la lancer via le connecteur Neon) avec la connexion
+propriétaire. Elle crée des données de test, tente 13 attaques (école contre école,
+caissier, mots de passe, droits administrateur, statuts calculés, audit, connexion
+applicative seule), puis **annule tout**. Le résultat s'affiche dans le message final :
+`CONTRÔLE TERMINÉ : 13/13 OK (données de test annulées)`. Ce message apparaît comme une
+« erreur » : c'est voulu, c'est ce qui annule les données de test.
+
+Depuis l'environnement de développement cloud, le port Postgres (5432) est bloqué :
+les migrations ont été appliquées via le connecteur Neon, chaque fichier étant exécuté
+comme un bloc unique (`do ... execute ...`), sans modification du SQL.
+
 ## Points de vigilance pour la suite
 
 - **Toute nouvelle table doit activer la RLS**, définir ses politiques et accorder
@@ -122,3 +136,7 @@ chaque tentative interdite est refusée **pour le bon motif**.
   nécessitera des politiques dédiées limitées à leur famille.
 - Remboursement partiel : la créance ne se rouvre pas seule, l'application doit
   réduire l'affectation concernée (opération tracée).
+- **Neon Auth** a été activé par Vercel sur le projet (schéma `neon_auth`). Scola utilise
+  son propre Better Auth (schéma `auth`) : Neon Auth est inutilisé et pourra être désactivé.
+- **Région** : le projet Neon est en `aws-us-east-2` (Ohio). La région ne se change pas
+  après création : à décider avant la production (proximité, loi ivoirienne / ARTCI).
