@@ -22,7 +22,8 @@ Stack cible : **Next.js + PostgreSQL (Neon) + Drizzle + Better Auth**, déploiem
 | `0003_payments_treasury.sql` — caisses, comptes bancaires, paiements, rapprochement paiement → facture → échéance, remboursements, mouvements et soldes de trésorerie | ✅ |
 | `0004_security.sql` — permissions, rôles par défaut, RLS sur toutes les tables, anti-escalade, droits par colonne, garde-fous, audit branché | ✅ |
 | Relances WhatsApp, charges, fournisseurs, budget | ⏳ à faire |
-| Application Next.js (connexion, dashboard) | ⏳ à faire |
+| Application Next.js : inscription, connexion, 2FA (obligatoire pour les rôles sensibles), création de l'établissement, tableau de bord | ✅ |
+| Modules métier dans l'interface (élèves, factures, paiements…) | ⏳ à faire |
 
 ## Rôles Postgres et connexion de l'application
 
@@ -129,6 +130,20 @@ passe, session retrouvée depuis le cookie, création d'école au nom de l'utili
 isolation entre écoles, connexion applicative sans utilisateur refusée, identifiant non
 UUID refusé, mots de passe invisibles des requêtes utilisateur, activation de la double
 authentification puis second facteur exigé à la connexion suivante.
+
+## Test dans un vrai navigateur
+
+`scripts/e2e-browser.ts` parcourt l'application avec Chromium (Playwright), sur
+l'application lancée en local (`npm run build && npm start`) et une base jetable :
+
+```bash
+APP_URL=http://localhost:3000 npm run test:e2e
+```
+
+Parcours vérifié (12 contrôles) : inscription → création de l'établissement → 2FA
+imposée au directeur (tableau de bord inaccessible sans elle) → activation → tableau de
+bord → déconnexion → page protégée refusée → mauvais mot de passe → second facteur exigé
+→ code erroné refusé → code valide → un second directeur ne voit que sa propre école.
 
 ## Contrôle rapide sur Neon (sans psql)
 
