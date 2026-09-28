@@ -1,8 +1,8 @@
 -- =====================================================================
 -- Tests d'intrusion de 0004_security.sql (RLS, RBAC, garde-fous).
 -- On se connecte successivement comme différents utilisateurs (rôle
--- Postgres `authenticated` + identifiant dans request.jwt.claim.sub,
--- comme le fait Supabase) et on tente ce qui doit être interdit.
+-- Postgres `authenticated` + identifiant dans le paramètre app.user_id,
+-- comme le fait l'application) et on tente ce qui doit être interdit.
 -- Tout est exécuté dans une transaction annulée à la fin.
 -- =====================================================================
 \set ON_ERROR_STOP 1
@@ -48,8 +48,8 @@ begin
   return n;
 end $$;
 
-grant usage on schema tests to anon, authenticated;
-grant execute on all functions in schema tests to anon, authenticated;
+grant usage on schema tests to authenticated, scola_app;
+grant execute on all functions in schema tests to authenticated, scola_app;
 
 -- ---------------------------------------------------------------------
 -- Utilisateurs
@@ -62,18 +62,28 @@ grant execute on all functions in schema tests to anon, authenticated;
 \set uB '''bbbbbbbb-0000-0000-0000-000000000001'''
 \set uX '''cccccccc-0000-0000-0000-000000000001'''
 
-insert into auth.users (id, email) values
-  (:uA, 'directeur.a@test'), (:uC, 'caissier.a@test'), (:uF, 'compta.a@test'),
-  (:uM, 'gestion.a@test'),   (:uY, 'nouveau.a@test'),  (:uB, 'directeur.b@test'),
-  (:uX, 'sans.ecole@test');
+insert into auth.users (id, email, name) values
+  (:uA, 'directeur.a@test', 'Directeur A'), (:uC, 'caissier.a@test', 'Caissier A'),
+  (:uF, 'compta.a@test', 'Comptable A'),    (:uM, 'gestion.a@test', 'Gestionnaire A'),
+  (:uY, 'nouveau.a@test', 'Nouveau A'),     (:uB, 'directeur.b@test', 'Directeur B'),
+  (:uX, 'sans.ecole@test', 'Sans école');
+
+-- Des données de connexion sensibles, comme les créerait Better Auth.
+insert into auth.accounts (user_id, account_id, provider_id, password)
+  values (:uA, :uA, 'credential', 'empreinte-du-mot-de-passe');
+insert into auth.sessions (user_id, token, expires_at)
+  values (:uA, 'jeton-de-session-secret', now() + interval '1 day');
+
+select tests.expect('profil créé automatiquement à l''inscription (nom repris)',
+  (select full_name = 'Directeur A' and email = 'directeur.a@test' from profiles where id = :uA));
 
 -- ---------------------------------------------------------------------
 -- Inscription de deux écoles via la RPC publique
 -- ---------------------------------------------------------------------
 set role authenticated;
-select set_config('request.jwt.claim.sub', :uA, false) as _sub \gset
+select set_config('app.user_id', :uA, false) as _sub \gset
 select public.create_organization('Groupe A', 'École A') as org_a \gset
-select set_config('request.jwt.claim.sub', :uB, false) as _sub \gset
+select set_config('app.user_id', :uB, false) as _sub \gset
 select public.create_organization('Groupe B', 'École B') as org_b \gset
 reset role;
 
@@ -91,7 +101,7 @@ select tests.expect('le créateur est directeur de l''école A',
 -- Le directeur A prépare son école
 -- ---------------------------------------------------------------------
 set role authenticated;
-select set_config('request.jwt.claim.sub', :uA, false) as _sub \gset
+select set_config('app.user_id', :uA, false) as _sub \gset
 
 insert into families (organization_id, name) values (:'org_a', 'Famille KOUASSI') returning id as family_a \gset
 insert into students (organization_id, school_id, family_id, matricule, first_name, last_name)
@@ -120,7 +130,7 @@ select tests.expect('directeur : voit sa facture', (select count(*) = 1 from inv
 -- =====================================================================
 -- A. Isolation entre écoles : le directeur de l'école B attaque l'école A
 -- =====================================================================
-select set_config('request.jwt.claim.sub', :uB, false) as _sub \gset
+select set_config('app.user_id', :uB, false) as _sub \gset
 
 select tests.expect('B ne voit aucun élève de A',      (select count(*) = 0 from students  where organization_id = :'org_a'));
 select tests.expect('B ne voit aucune famille de A',   (select count(*) = 0 from families  where organization_id = :'org_a'));
@@ -145,24 +155,42 @@ select tests.expect('B supprime un élève de A : 0 ligne touchée',
   tests.affected(format($$delete from students where id = %L$$, :'student_a')) = 0);
 
 -- =====================================================================
--- B. Utilisateur connecté sans école, puis visiteur anonyme
+-- B. Utilisateur connecté sans école, puis connexion applicative
 -- =====================================================================
-select set_config('request.jwt.claim.sub', :uX, false) as _sub \gset
+select set_config('app.user_id', :uX, false) as _sub \gset
 select tests.expect('compte sans école : ne voit aucun élève',      (select count(*) = 0 from students));
 select tests.expect('compte sans école : ne voit aucune organisation', (select count(*) = 0 from organizations));
 
+-- Données de connexion : jamais lisibles par une requête utilisateur.
+select tests.expect_error('requête utilisateur lit les mots de passe', $$select * from auth.accounts$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit les jetons de session', $$select * from auth.sessions$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit la table des comptes', $$select * from auth.users$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit les secrets 2FA', $$select * from auth.two_factors$$, 'permission denied');
+
+-- La connexion de l'application SANS endosser un utilisateur : aucun
+-- accès aux données métier (sûr par défaut si le code oublie l'étape).
 reset role;
-set role anon;
-select tests.expect_error('anonyme lit les élèves',     $$select * from students$$, 'permission denied');
-select tests.expect_error('anonyme lit les paiements',  $$select * from payments$$, 'permission denied');
-select tests.expect_error('anonyme crée une école',     $$select public.create_organization('X', 'Y')$$, 'permission denied');
-reset role;
+select set_config('app.user_id', '', false) as _sub \gset
+set role scola_app;
+select tests.expect_error('connexion applicative lit les élèves',    $$select * from students$$, 'permission denied');
+select tests.expect_error('connexion applicative lit les paiements', $$select * from payments$$, 'permission denied');
+select tests.expect_error('connexion applicative crée une école',    $$select public.create_organization('X', 'Y')$$, 'permission denied');
+select tests.expect_error('connexion applicative écrit dans l''audit',
+  $$insert into audit_log (table_name, action) values ('x', 'INSERT')$$, 'permission denied');
+select tests.expect('connexion applicative : accède aux tables d''auth (Better Auth)',
+  (select count(*) = 7 from auth.users));
+
+-- Rôle utilisateur endossé mais aucun utilisateur identifié.
 set role authenticated;
+select tests.expect('rôle utilisateur sans identifiant : ne voit aucun élève', (select count(*) = 0 from students));
+select tests.expect('rôle utilisateur sans identifiant : ne voit aucune organisation', (select count(*) = 0 from organizations));
+select tests.expect_error('rôle utilisateur sans identifiant crée une école',
+  $$select public.create_organization('X', 'Y')$$, 'Authentification requise');
 
 -- =====================================================================
 -- C. Caissier
 -- =====================================================================
-select set_config('request.jwt.claim.sub', :uC, false) as _sub \gset
+select set_config('app.user_id', :uC, false) as _sub \gset
 
 select tests.expect('caissier : voit l''élève', (select count(*) = 1 from students));
 
@@ -213,7 +241,7 @@ select tests.expect_error('caissier valide sa propre demande',
 -- =====================================================================
 -- D. Directeur : garde-fous financiers et données sensibles
 -- =====================================================================
-select set_config('request.jwt.claim.sub', :uA, false) as _sub \gset
+select set_config('app.user_id', :uA, false) as _sub \gset
 
 select tests.expect_error('directeur force le statut « payée »',
   format($$update invoices set status = 'paid' where id = %L$$, :'invoice_a'), 'calculé automatiquement');
@@ -256,7 +284,7 @@ select tests.expect('journal d''audit : tentative de remboursement tracée',
 -- =====================================================================
 -- E. Gestionnaire des membres : pas d'escalade de privilèges
 -- =====================================================================
-select set_config('request.jwt.claim.sub', :uM, false) as _sub \gset
+select set_config('app.user_id', :uM, false) as _sub \gset
 
 select tests.expect_error('gestionnaire nomme un nouveau directeur',
   format($$insert into memberships (user_id, organization_id, role_id) values (%L, %L, %L)$$,
@@ -279,7 +307,7 @@ select tests.expect('gestionnaire invite un collègue avec un rôle ≤ au sien 
 
 -- Un roles.manage ne peut accorder que ce qu'il possède : le comptable
 -- (roles.manage absent) ne peut rien accorder du tout.
-select set_config('request.jwt.claim.sub', :uF, false) as _sub \gset
+select set_config('app.user_id', :uF, false) as _sub \gset
 select tests.expect_error('comptable ajoute org.manage au rôle gestionnaire',
   format($$insert into role_permissions (role_id, permission_id)
            select %L, id from permissions where code = 'org.manage'$$, :'manager_a'), 'row-level security');

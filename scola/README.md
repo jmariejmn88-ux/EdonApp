@@ -4,14 +4,13 @@ Socle technique du SaaS décrit dans le cahier des charges v1.0 (marché initial
 
 Stack cible : **Next.js + PostgreSQL (Neon) + Drizzle + Better Auth**, déploiement Vercel.
 
-> 🔄 **Migration en cours depuis Supabase.** Les migrations SQL (`db/migrations/`) sont du
-> PostgreSQL standard ; seule la partie Supabase (`auth.users`, `auth.uid()`, rôles
-> `anon`/`authenticated`/`service_role`) reste à remplacer par Better Auth. En attendant,
-> les tests utilisent `db/tests/00_supabase_stub.sql`.
+> 🔄 **Migration depuis Supabase : partie base de données terminée.** Les tables de
+> connexion Better Auth et les rôles Postgres sont créés par `0000_platform.sql`.
+> Reste à écrire le code Next.js (Better Auth, Drizzle, `withUser()`).
 
 > ℹ️ La base de données est sécurisée (RLS active, testée) mais **n'a pas encore été
-> appliquée sur un vrai projet Supabase** : les tests tournent sur un Postgres 16 local
-> avec un stub du schéma `auth`. L'application Next.js n'existe pas encore.
+> appliquée sur Neon** : les tests tournent sur un Postgres 16 local. L'application
+> Next.js n'existe pas encore.
 
 ## État d'avancement
 
@@ -23,6 +22,25 @@ Stack cible : **Next.js + PostgreSQL (Neon) + Drizzle + Better Auth**, déploiem
 | `0004_security.sql` — permissions, rôles par défaut, RLS sur toutes les tables, anti-escalade, droits par colonne, garde-fous, audit branché | ✅ |
 | Relances WhatsApp, charges, fournisseurs, budget | ⏳ à faire |
 | Application Next.js (connexion, dashboard) | ⏳ à faire |
+
+## Rôles Postgres et connexion de l'application
+
+| Rôle | Utilisé par | Accès |
+|---|---|---|
+| propriétaire (fourni par Neon) | migrations, tâches backend de confiance (webhooks) | tout, contourne la RLS |
+| `scola_app` | l'application Next.js | **uniquement** les tables de connexion (`auth.*`) pour Better Auth |
+| `authenticated` | chaque requête faite au nom d'un utilisateur | données métier filtrées par la RLS ; aucun accès à `auth.*` |
+
+Pour une requête métier, l'application ouvre une transaction, endosse le rôle
+`authenticated` et indique l'utilisateur vérifié par Better Auth
+(`set_config('app.user_id', ...)`). Si elle oublie cette étape, la requête est
+refusée : c'est sûr par défaut.
+
+Après la première migration, donner un mot de passe à `scola_app` (une seule fois) :
+
+```sql
+alter role scola_app with login password '...';
+```
 
 ## Rôles par défaut (cahier §4)
 
@@ -47,7 +65,8 @@ backend : aucun utilisateur ne peut modifier ce champ.
   organisations dont il est membre actif.
 - FK composites `(id, organization_id)` : impossible de lier deux lignes d'écoles
   différentes, même en connaissant un UUID.
-- Visiteur non connecté (`anon`) : aucun accès aux tables.
+- Connexion de l'application sans utilisateur identifié : aucun accès aux données métier.
+- Mots de passe, jetons de session et secrets 2FA (`auth.*`) invisibles des requêtes utilisateur.
 
 **Anti-escalade de privilèges**
 - On ne peut attribuer (ou retirer) qu'un rôle dont on possède déjà toutes les permissions.
@@ -79,24 +98,24 @@ backend : aucun utilisateur ne peut modifier ce champ.
 
 ## Lancer les tests
 
-Sur un Postgres 16 **jetable** (jamais sur un vrai projet Supabase) :
+Sur une base Postgres 16 **jetable** (jamais sur la base de production) :
 
 ```bash
-psql -f db/tests/00_supabase_stub.sql      # rôles anon/authenticated, auth.users, auth.uid()
-for f in db/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
+DATABASE_URL_OWNER=postgres://... npm run db:migrate   # applique db/migrations dans l'ordre
 psql -f db/tests/payments_treasury_test.sql   # 17 vérifications
-psql -f db/tests/rls_security_test.sql        # 66 vérifications
+psql -f db/tests/rls_security_test.sql        # 76 vérifications
 ```
 
 Les scripts tournent dans une transaction annulée à la fin. `rls_security_test.sql`
 se connecte successivement comme directeur, caissier, comptable, gestionnaire,
-directeur d'une autre école, compte sans école et visiteur anonyme, et vérifie que
+directeur d'une autre école, compte sans école et connexion applicative sans
+utilisateur, et vérifie que
 chaque tentative interdite est refusée **pour le bon motif**.
 
 ## Points de vigilance pour la suite
 
-- **Toute nouvelle table doit activer la RLS** et définir ses politiques : Supabase
-  accorde par défaut des droits aux rôles `anon`/`authenticated` sur les nouvelles tables.
+- **Toute nouvelle table doit activer la RLS**, définir ses politiques et accorder
+  explicitement ses droits à `authenticated` (sans droits, elle reste inaccessible).
 - `app.set_audit_reason()` (motif d'une modification) est dans le schéma `app`, non
   exposé par l'API : prévoir une RPC publique ou l'appeler depuis le backend.
 - Portail parent : pas encore d'accès (les parents ne sont pas des membres) ; il

@@ -4,15 +4,16 @@
 -- les tables, protections anti-escalade, droits par colonne, garde-fous
 -- financiers et branchement du journal d'audit (§29).
 --
--- Rôles Postgres Supabase :
---   anon           visiteur non connecté      -> aucun accès aux tables
---   authenticated  utilisateur connecté       -> accès filtré par RLS
---   service_role   backend / webhooks         -> contourne la RLS
+-- Rôles Postgres (voir 0000) :
+--   scola_app      connexion de l'application  -> tables d'auth uniquement
+--   authenticated  requête au nom d'un utilisateur -> accès filtré par RLS
+--   propriétaire   migrations et tâches backend de confiance (webhook
+--                  opérateur de paiement...) -> contourne la RLS
 --
--- Convention : auth.uid() non nul = requête d'un utilisateur via l'API.
+-- Convention : auth.uid() non nul = requête d'un utilisateur.
 -- Les contrôles « métier » ci-dessous (confirmation, validation d'un
 -- remboursement...) ne s'appliquent qu'à ce contexte ; le backend de
--- confiance (webhook opérateur en service_role) n'y est pas soumis.
+-- confiance (connexion propriétaire, sans utilisateur) n'y est pas soumis.
 -- =====================================================================
 
 -- =====================================================================
@@ -440,7 +441,7 @@ $$;
 
 -- Organisations : lecture par les membres, modification par org.manage.
 -- Création uniquement via create_organization(), suppression par le
--- backend (service_role).
+-- backend de confiance (connexion propriétaire).
 alter table public.organizations enable row level security;
 create policy organizations_select on public.organizations for select to authenticated
   using (app.is_org_member(id) or app.is_platform_admin());
@@ -522,8 +523,8 @@ create policy audit_log_select on public.audit_log for select to authenticated
 -- =====================================================================
 
 -- Point de départ : aucun droit pour les clients.
-revoke all on all tables    in schema public from anon, authenticated;
-revoke all on all sequences in schema public from anon, authenticated;
+revoke all on all tables    in schema public from public, authenticated, scola_app;
+revoke all on all sequences in schema public from public, authenticated, scola_app;
 
 -- Tables métier : CRUD, filtré par la RLS.
 grant select, insert, update, delete on
@@ -580,5 +581,5 @@ grant execute on function
   app.is_collected(public.payment_status)   -- utilisée par les garde-fous des paiements
 to authenticated;
 
-revoke all on function public.create_organization(text, text) from public, anon;
+revoke all on function public.create_organization(text, text) from public, scola_app;
 grant execute on function public.create_organization(text, text) to authenticated;

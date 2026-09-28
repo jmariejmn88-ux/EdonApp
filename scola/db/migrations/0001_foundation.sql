@@ -11,7 +11,7 @@
 create extension if not exists pgcrypto;
 
 -- Les fonctions utilitaires de sécurité vivent dans un schéma dédié,
--- non exposé par l'API REST de Supabase.
+-- sur lequel les rôles applicatifs n'ont que des droits d'exécution ciblés.
 create schema if not exists app;
 
 -- ---------------------------------------------------------------------
@@ -35,7 +35,7 @@ create table public.organizations (
 );
 
 -- ---------------------------------------------------------------------
--- Profils utilisateurs (1-1 avec auth.users géré par Supabase)
+-- Profils utilisateurs (1-1 avec auth.users, table gérée par Better Auth)
 -- ---------------------------------------------------------------------
 create table public.profiles (
   id                 uuid primary key references auth.users (id) on delete cascade,
@@ -250,7 +250,7 @@ set search_path = public, pg_temp
 as $$
 begin
   insert into public.profiles (id, email, full_name)
-  values (new.id, new.email, coalesce(new.raw_user_meta_data ->> 'full_name', ''));
+  values (new.id, new.email, coalesce(new.name, ''));
   return new;
 end;
 $$;
@@ -258,3 +258,21 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function app.handle_new_user();
+
+-- Changement d'email dans Better Auth : le profil suit.
+create or replace function app.sync_user_email()
+returns trigger
+language plpgsql security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.profiles set email = new.email where id = new.id;
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_email_changed
+  after update of email on auth.users
+  for each row
+  when (new.email is distinct from old.email)
+  execute function app.sync_user_email();
