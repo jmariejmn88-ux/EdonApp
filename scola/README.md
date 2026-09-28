@@ -1,8 +1,13 @@
-# EdonApp SaaS — pilotage financier et recouvrement scolaire
+# Scola — pilotage financier et recouvrement scolaire
 
 Socle technique du SaaS décrit dans le cahier des charges v1.0 (marché initial : Côte d'Ivoire).
 
-Stack : **Next.js + Supabase** (Postgres, Auth, RLS), déploiement Vercel.
+Stack cible : **Next.js + PostgreSQL (Neon) + Drizzle + Better Auth**, déploiement Vercel.
+
+> 🔄 **Migration en cours depuis Supabase.** Les migrations SQL (`db/migrations/`) sont du
+> PostgreSQL standard ; seule la partie Supabase (`auth.users`, `auth.uid()`, rôles
+> `anon`/`authenticated`/`service_role`) reste à remplacer par Better Auth. En attendant,
+> les tests utilisent `db/tests/00_supabase_stub.sql`.
 
 > ℹ️ La base de données est sécurisée (RLS active, testée) mais **n'a pas encore été
 > appliquée sur un vrai projet Supabase** : les tests tournent sur un Postgres 16 local
@@ -77,10 +82,10 @@ backend : aucun utilisateur ne peut modifier ce champ.
 Sur un Postgres 16 **jetable** (jamais sur un vrai projet Supabase) :
 
 ```bash
-psql -f supabase/tests/00_supabase_stub.sql      # rôles anon/authenticated, auth.users, auth.uid()
-for f in supabase/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
-psql -f supabase/tests/payments_treasury_test.sql   # 17 vérifications
-psql -f supabase/tests/rls_security_test.sql        # 66 vérifications
+psql -f db/tests/00_supabase_stub.sql      # rôles anon/authenticated, auth.users, auth.uid()
+for f in db/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
+psql -f db/tests/payments_treasury_test.sql   # 17 vérifications
+psql -f db/tests/rls_security_test.sql        # 66 vérifications
 ```
 
 Les scripts tournent dans une transaction annulée à la fin. `rls_security_test.sql`
