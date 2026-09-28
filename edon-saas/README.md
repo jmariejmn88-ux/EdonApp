@@ -14,11 +14,40 @@ Stack : **Next.js + Supabase** (Postgres, Auth, RLS), déploiement Vercel.
 |---|---|
 | `0001_foundation.sql` — organisations, profils, rôles/permissions, appartenances, journal d'audit, fonctions de sécurité | ✅ |
 | `0002_domain.sql` — établissements, élèves/familles, centres de coûts/revenus, services, factures, échéances | ✅ |
-| Paiements, remboursements, relances WhatsApp, charges, fournisseurs, budget, trésorerie | ⏳ à faire |
+| `0003_payments_treasury.sql` — caisses, comptes bancaires, paiements, rapprochement paiement → facture → échéance, remboursements, mouvements et soldes de trésorerie | ✅ |
+| Relances WhatsApp, charges, fournisseurs, budget | ⏳ à faire |
 | RLS + triggers d'audit + rôles par défaut | ⏳ à faire |
 | Application Next.js (connexion, dashboard) | ⏳ à faire |
 
-Les deux migrations ont été appliquées avec succès sur un Postgres 16 local.
+Les trois migrations s'appliquent sans erreur sur un Postgres 16 local.
+
+## Paiements et trésorerie : règles appliquées par la base
+
+- Le montant payé d'une facture ou d'une échéance n'est **jamais saisi** : il est
+  recalculé à partir des affectations de paiements encaissés.
+- Impossible d'affecter plus que le montant d'un paiement, ou plus que le montant
+  d'une échéance / d'une facture.
+- Un paiement encaissé est **figé** (montant, moyen, compte, famille) et ne peut être
+  ni supprimé ni repassé en « échoué » : on corrige par un remboursement.
+- Un paiement entièrement remboursé est définitif.
+- Une même transaction opérateur (`external_reference`) ne peut être enregistrée
+  qu'une fois (protège contre un webhook rejoué).
+- Un encaissement ou un remboursement crée automatiquement le mouvement de caisse /
+  banque ; les soldes sont calculés (vue `treasury_account_balances`), jamais stockés.
+- Pas de numéro de compte bancaire complet en base (champ masqué uniquement).
+
+## Lancer les tests
+
+Sur une base Postgres jetable, avec un stub du schéma `auth` de Supabase
+(table `auth.users` et fonction `auth.uid()`), appliquer les migrations dans
+l'ordre puis :
+
+```bash
+psql -f supabase/tests/payments_treasury_test.sql
+```
+
+Le script tourne dans une transaction annulée à la fin et affiche `PASS` pour
+chaque vérification (scénario du cahier §12, tentatives de fraude, remboursement).
 
 ## Principes de sécurité déjà en place
 
