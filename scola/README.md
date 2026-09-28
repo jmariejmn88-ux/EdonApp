@@ -4,11 +4,12 @@ Socle technique du SaaS décrit dans le cahier des charges v1.0 (marché initial
 
 Stack cible : **Next.js + PostgreSQL (Neon) + Drizzle + Better Auth**, déploiement Vercel.
 
-> 🔄 **Migration depuis Supabase : partie base de données terminée.** Les tables de
-> connexion Better Auth et les rôles Postgres sont créés par `0000_platform.sql`.
-> Reste à écrire le code Next.js (Better Auth, Drizzle, `withUser()`).
+> 🔐 **Connexion : Better Auth auto-hébergé** (email + mot de passe, double
+> authentification TOTP). Tables dans le schéma `auth` aux noms par défaut de Better Auth
+> (`0000` + `0005`). Configuration : `src/lib/auth.ts` ; accès aux données : `withUser()`
+> dans `src/lib/db.ts`. Test de bout en bout : `npm run test:auth` (13/13).
 
-> ✅ **Base Neon en place (branche `dev`).** Les 5 migrations sont appliquées sur le projet
+> ✅ **Base Neon en place (branche `dev`).** Les 6 migrations sont appliquées sur le projet
 > Neon « Scola » (branche `dev`, Postgres 18) et le contrôle de sécurité y passe (13/13).
 > La branche `production` n'a pas encore été touchée. L'application Next.js n'existe pas encore.
 
@@ -112,6 +113,23 @@ directeur d'une autre école, compte sans école et connexion applicative sans
 utilisateur, et vérifie que
 chaque tentative interdite est refusée **pour le bon motif**.
 
+## Test de bout en bout de la connexion
+
+`scripts/test-auth.ts` utilise le vrai Better Auth et `withUser()` sur une base jetable
+(migrations appliquées, rôle `scola_app` avec un mot de passe) :
+
+```bash
+DATABASE_URL=postgres://scola_app:...@localhost/... \
+BETTER_AUTH_SECRET=$(openssl rand -base64 32) BETTER_AUTH_URL=http://localhost:3000 \
+npm run test:auth
+```
+
+Il vérifie : inscription (UUID, profil créé, mot de passe haché), refus d'un mauvais mot de
+passe, session retrouvée depuis le cookie, création d'école au nom de l'utilisateur,
+isolation entre écoles, connexion applicative sans utilisateur refusée, identifiant non
+UUID refusé, mots de passe invisibles des requêtes utilisateur, activation de la double
+authentification puis second facteur exigé à la connexion suivante.
+
 ## Contrôle rapide sur Neon (sans psql)
 
 `db/tests/smoke_check.sql` est **une seule instruction SQL** : on peut la coller dans
@@ -137,6 +155,8 @@ comme un bloc unique (`do ... execute ...`), sans modification du SQL.
 - Remboursement partiel : la créance ne se rouvre pas seule, l'application doit
   réduire l'affectation concernée (opération tracée).
 - **Neon Auth** a été activé par Vercel sur le projet (schéma `neon_auth`). Scola utilise
-  son propre Better Auth (schéma `auth`) : Neon Auth est inutilisé et pourra être désactivé.
+  son propre Better Auth (schéma `auth`), notamment parce que Neon Auth ne propose pas
+  encore la double authentification exigée au §30 : Neon Auth est inutilisé et pourra
+  être désactivé.
 - **Région** : le projet Neon est en `aws-us-east-2` (Ohio). La région ne se change pas
   après création : à décider avant la production (proximité, loi ivoirienne / ARTCI).

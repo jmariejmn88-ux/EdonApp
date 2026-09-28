@@ -28,7 +28,7 @@ begin
   -- 1. Migrations et RLS
   total := total + 1;
   select count(*) into n from public._migrations;
-  if n >= 5 then ok := ok + 1; results := array_append(results, format('OK migrations appliquées (%s)', n));
+  if n >= 6 then ok := ok + 1; results := array_append(results, format('OK migrations appliquées (%s)', n));
   else results := array_append(results, format('ÉCHEC migrations appliquées (%s)', n)); end if;
 
   total := total + 1;
@@ -38,11 +38,11 @@ begin
   else results := array_append(results, format('ÉCHEC %s table(s) sans RLS', n)); end if;
 
   -- Données : trois utilisateurs (le profil est créé automatiquement).
-  insert into auth.users (id, email, name) values
+  insert into auth."user" (id, email, name) values
     (uA, 'controle.a.' || uA || '@test', 'Directeur A'),
     (uC, 'controle.c.' || uC || '@test', 'Caissier A'),
     (uB, 'controle.b.' || uB || '@test', 'Directeur B');
-  insert into auth.accounts (user_id, account_id, provider_id, password)
+  insert into auth.account ("userId", "accountId", "providerId", password)
     values (uA, uA::text, 'credential', 'empreinte');
 
   -- Le directeur A inscrit son école et la prépare.
@@ -103,7 +103,7 @@ begin
 
   total := total + 1;
   begin
-    perform 1 from auth.accounts;
+    perform 1 from auth.account;
     results := array_append(results, 'ÉCHEC requête utilisateur lit les mots de passe');
   exception when insufficient_privilege then
     ok := ok + 1; results := array_append(results, 'OK mots de passe invisibles des requêtes utilisateur');

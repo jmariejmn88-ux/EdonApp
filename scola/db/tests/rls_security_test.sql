@@ -62,16 +62,16 @@ grant execute on all functions in schema tests to authenticated, scola_app;
 \set uB '''bbbbbbbb-0000-0000-0000-000000000001'''
 \set uX '''cccccccc-0000-0000-0000-000000000001'''
 
-insert into auth.users (id, email, name) values
+insert into auth."user" (id, email, name) values
   (:uA, 'directeur.a@test', 'Directeur A'), (:uC, 'caissier.a@test', 'Caissier A'),
   (:uF, 'compta.a@test', 'Comptable A'),    (:uM, 'gestion.a@test', 'Gestionnaire A'),
   (:uY, 'nouveau.a@test', 'Nouveau A'),     (:uB, 'directeur.b@test', 'Directeur B'),
   (:uX, 'sans.ecole@test', 'Sans école');
 
 -- Des données de connexion sensibles, comme les créerait Better Auth.
-insert into auth.accounts (user_id, account_id, provider_id, password)
+insert into auth.account ("userId", "accountId", "providerId", password)
   values (:uA, :uA, 'credential', 'empreinte-du-mot-de-passe');
-insert into auth.sessions (user_id, token, expires_at)
+insert into auth.session ("userId", token, "expiresAt")
   values (:uA, 'jeton-de-session-secret', now() + interval '1 day');
 
 select tests.expect('profil créé automatiquement à l''inscription (nom repris)',
@@ -162,10 +162,10 @@ select tests.expect('compte sans école : ne voit aucun élève',      (select c
 select tests.expect('compte sans école : ne voit aucune organisation', (select count(*) = 0 from organizations));
 
 -- Données de connexion : jamais lisibles par une requête utilisateur.
-select tests.expect_error('requête utilisateur lit les mots de passe', $$select * from auth.accounts$$, 'permission denied');
-select tests.expect_error('requête utilisateur lit les jetons de session', $$select * from auth.sessions$$, 'permission denied');
-select tests.expect_error('requête utilisateur lit la table des comptes', $$select * from auth.users$$, 'permission denied');
-select tests.expect_error('requête utilisateur lit les secrets 2FA', $$select * from auth.two_factors$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit les mots de passe', $$select * from auth.account$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit les jetons de session', $$select * from auth.session$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit la table des comptes', $$select * from auth."user"$$, 'permission denied');
+select tests.expect_error('requête utilisateur lit les secrets 2FA', $$select * from auth."twoFactor"$$, 'permission denied');
 
 -- La connexion de l'application SANS endosser un utilisateur : aucun
 -- accès aux données métier (sûr par défaut si le code oublie l'étape).
@@ -178,7 +178,7 @@ select tests.expect_error('connexion applicative crée une école',    $$select 
 select tests.expect_error('connexion applicative écrit dans l''audit',
   $$insert into audit_log (table_name, action) values ('x', 'INSERT')$$, 'permission denied');
 select tests.expect('connexion applicative : accède aux tables d''auth (Better Auth)',
-  (select count(*) = 7 from auth.users));
+  (select count(*) = 7 from auth."user"));
 
 -- Rôle utilisateur endossé mais aucun utilisateur identifié.
 set role authenticated;
